@@ -11,16 +11,14 @@ const {
     TextInputBuilder,
     TextInputStyle,
     PermissionFlagsBits,
-    ChannelType,
-    REST,
-    Routes,
-    SlashCommandBuilder
+    ChannelType
 } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 
-// Configuración nativa para las variables de entorno de Railway
 const config = {
     TOKEN: process.env.TOKEN,
-    CLIENT_ID: process.env.CLIENT_ID
+    PREFIX: "!"
 };
 
 const client = new Client({
@@ -32,203 +30,119 @@ const client = new Client({
     ]
 });
 
-// Base de datos en memoria (Almacena la configuración mientras el bot esté encendido en Railway)
-const db = {
+// URL de la imagen oficial proporcionada para SirenMc
+const IMAGEN_SIRENMC = "https://cdn.discordapp.com/attachments/1498839434647441478/1508063329845776455/Screenshot_20260524-050445.Google.png?ex=6a142cec&is=6a12db6c&hm=d982b9f4852e2e8c4a4307e68c3f90426cd66f69e6bb34a5f83a249f9895853c&";
+
+// Persistencia local para que Railway no borre los canales asignados
+const dbPath = path.join(__dirname, 'database.json');
+let db = {
     tickets: { canal: null, categoria: null, rolStaff: null },
     bienvenidas: { canal: null },
     boosts: { canal: null }
 };
 
-// --- REGISTRO DE COMANDOS DE BARRA ---
-const commands = [
-    new SlashCommandBuilder()
-        .setName('bienvenidas')
-        .setDescription('Configura el canal de bienvenidas de SirenMc.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addChannelOption(option => option.setName('canal').setDescription('Canal de bienvenidas').setRequired(true)),
-    
-    new SlashCommandBuilder()
-        .setName('boosts')
-        .setDescription('Configura el canal de notificaciones de Nitro Boosts.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addChannelOption(option => option.setName('canal').setDescription('Canal de boosts').setRequired(true)),
+if (fs.existsSync(dbPath)) {
+    try { db = JSON.parse(fs.readFileSync(dbPath, 'utf8')); } catch (e) { console.log("Iniciando almacenamiento de datos..."); }
+}
+const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 
-    new SlashCommandBuilder()
-        .setName('tickets')
-        .setDescription('Configura e instala el panel de soporte técnico.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addChannelOption(option => option.setName('canal_panel').setDescription('Canal donde se enviará el menú de tickets').setRequired(true))
-        .addChannelOption(option => option.setName('categoria').setDescription('Categoría donde se abrirán los tickets').setRequired(true))
-        .addRoleOption(option => option.setName('rol_staff').setDescription('Rol de soporte que gestionará los tickets').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('borrar')
-        .setDescription('Desvincula la configuración de un módulo del servidor.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption(option => option.setName('modulo')
-            .setDescription('Módulo que deseas limpiar')
-            .setRequired(true)
-            .addChoices(
-                { name: 'Tickets', value: 'tickets' },
-                { name: 'Bienvenidas', value: 'bienvenidas' },
-                { name: 'Boosts', value: 'boosts' }
-            )),
-    
-    new SlashCommandBuilder()
-        .setName('ip')
-        .setDescription('Muestra la información de conexión a SirenMc.'),
-
-    new SlashCommandBuilder()
-        .setName('claim')
-        .setDescription('Reclama el ticket actual como tu responsabilidad.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
-
-    new SlashCommandBuilder()
-        .setName('unclaim')
-        .setDescription('Libera el ticket actual para que otro staff lo atienda.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
-
-    new SlashCommandBuilder()
-        .setName('rename')
-        .setDescription('Cambia el nombre del canal del ticket.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-        .addStringOption(option => option.setName('nombre').setDescription('Nuevo nombre para el canal').setRequired(true))
-].map(command => command.toJSON());
-
-client.once('ready', async () => {
-    console.log(`🧜‍♀️ SirenMc conectado correctamente como ${client.user.tag}`);
+client.once('ready', () => {
+    console.log(`🧜‍♀️ SirenMc activo mediante cuenta: ${client.user.tag}`);
     client.user.setActivity('play.sirenmc.net', { type: 3 });
-
-    // Carga automática de comandos de barra globales
-    const rest = new REST({ version: '10' }).setToken(config.TOKEN);
-    try {
-        await rest.put(Routes.applicationCommands(config.CLIENT_ID), { body: commands });
-        console.log('✅ Comandos globales actualizados en Discord.');
-    } catch (error) {
-        console.error('❌ Error cargando los comandos de barra:', error);
-    }
 });
 
-// --- EJECUCIÓN DE COMANDOS EN EL SERVIDOR ---
-client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
+// --- COMANDOS BASADOS EN PREFIJO (!) ---
+client.on('messageCreate', async (message) => {
+    if (message.author.bot || !message.content.startsWith(config.PREFIX)) return;
 
-    const { commandName, options } = interaction;
+    const args = message.content.slice(config.PREFIX.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
 
-    if (commandName === 'bienvenidas') {
-        const targetChannel = options.getChannel('canal');
-        db.bienvenidas.canal = targetChannel.id;
-        return interaction.reply({ content: `🔔 Canal de bienvenidas asignado a ${targetChannel}.`, ephemeral: true });
-    }
+    // Comando !tickets (EXCLUSIVO ADMINISTRADORES)
+    if (command === 'tickets') {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return message.reply('❌ Permisos insuficientes. Este comando requiere privilegios de **Administrador**.');
+        }
 
-    if (commandName === 'boosts') {
-        const targetChannel = options.getChannel('canal');
-        db.boosts.canal = targetChannel.id;
-        return interaction.reply({ content: `💎 Alertas de Nitro Boost asignadas a ${targetChannel}.`, ephemeral: true });
-    }
+        // Obtener argumentos estructurados: !tickets <#canal_panel> <ID_categoria> <@Rol_Staff>
+        const canalPanel = message.mentions.channels.first();
+        const categoriaId = args[1];
+        const rolStaff = message.mentions.roles.first() || message.guild.roles.cache.get(args[2]);
 
-    if (commandName === 'tickets') {
-        const canalPanel = options.getChannel('canal_panel');
+        if (!canalPanel || !categoriaId || !rolStaff) {
+            return message.reply('ℹ️ **Uso correcto del comando:**\n`!tickets <#canal-donde-va-el-panel> <ID-de-la-categoria> <@RolStaff>`');
+        }
+
         db.tickets.canal = canalPanel.id;
-        db.tickets.categoria = options.getChannel('categoria').id;
-        db.tickets.rolStaff = options.getRole('rol_staff').id;
+        db.tickets.categoria = categoriaId;
+        db.tickets.rolStaff = rolStaff.id;
+        saveDB();
 
         const embedTickets = new EmbedBuilder()
-            .setTitle('🧜‍♀️ CENTRO DE SOPORTE - SIRENMC')
-            .setDescription('Bienvenido al área de atención al jugador de SirenMc.\n\nSelecciona en el menú desplegable inferior el motivo exacto de tu consulta para abrir un canal privado con nuestro equipo de soporte.')
+            .setTitle('🧜‍♀️ CENTRO DE SOPORTE - SIRENMC NETWORK')
+            .setDescription('Bienvenido al sector de asistencia de nuestra comunidad.\n\nSi necesitas reportar a un usuario, tienes dudas sobre la tienda, o has encontrado algún fallo, despliega el menú inferior y selecciona la categoría correcta.')
             .setColor('#00bfff')
-            .setImage('https://i.imgur.com/Tu-Imagen-De-SirenMc.png') // Pon aquí el link de tu banner de Discord
-            .setFooter({ text: 'SirenMc Network • Soporte Técnico' });
+            .setImage(IMAGEN_SIRENMC)
+            .setFooter({ text: 'SirenMc Network • Gestión Oficial' });
 
         const menuSeleccion = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
                 .setCustomId('menu_tickets')
-                .setPlaceholder('Selecciona una categoría de asistencia...')
+                .setPlaceholder('Selecciona la categoría de tu consulta...')
                 .addOptions(
-                    new StringSelectMenuOptionBuilder().setLabel('Soporte General').setValue('Soporte').setEmoji('🎫').setDescription('Dudas generales sobre la Network.'),
-                    new StringSelectMenuOptionBuilder().setLabel('Ayuda Técnica').setValue('Ayuda').setEmoji('🛠️').setDescription('Problemas técnicos de conexión o carga.'),
-                    new StringSelectMenuOptionBuilder().setLabel('Reportar Jugador').setValue('Reportar').setEmoji('🚫').setDescription('Denuncia a un usuario rompiendo reglas.'),
-                    new StringSelectMenuOptionBuilder().setLabel('Problemas con la Tienda').setValue('Tienda').setEmoji('🛒').setDescription('Consultas sobre compras y rangos.'),
-                    new StringSelectMenuOptionBuilder().setLabel('Reportes Staff').setValue('Reportes').setEmoji('⚖️').setDescription('Quejas o reportes de algún miembro del equipo.'),
-                    new StringSelectMenuOptionBuilder().setLabel('Reportar Bugs').setValue('Bugs').setEmoji('🐛').setDescription('Errores dentro de las modalidades.'),
-                    new StringSelectMenuOptionBuilder().setLabel('Solicitud de Revives').setValue('Revives').setEmoji('❤️').setDescription('Peticiones legítimas de reanimación.'),
-                    new StringSelectMenuOptionBuilder().setLabel('Apelaciones de Sanción').setValue('Apelaciones').setEmoji('🔓').setDescription('Apela un baneo o muteo injusto.')
+                    new StringSelectMenuOptionBuilder().setLabel('Soporte General').setValue('Soporte').setEmoji('🎫'),
+                    new StringSelectMenuOptionBuilder().setLabel('Ayuda Técnica').setValue('Ayuda').setEmoji('🛠️'),
+                    new StringSelectMenuOptionBuilder().setLabel('Reportar Jugador').setValue('Reportar').setEmoji('🚫'),
+                    new StringSelectMenuOptionBuilder().setLabel('Problemas con la Tienda').setValue('Tienda').setEmoji('🛒'),
+                    new StringSelectMenuOptionBuilder().setLabel('Reportes Staff').setValue('Reportes').setEmoji('⚖️'),
+                    new StringSelectMenuOptionBuilder().setLabel('Reportar Bugs').setValue('Bugs').setEmoji('🐛'),
+                    new StringSelectMenuOptionBuilder().setLabel('Solicitud de Revives').setValue('Revives').setEmoji('❤️'),
+                    new StringSelectMenuOptionBuilder().setLabel('Apelaciones de Sanción').setValue('Apelaciones').setEmoji('🔓')
                 )
         );
 
         await canalPanel.send({ embeds: [embedTickets], components: [menuSeleccion] });
-        return interaction.reply({ content: `✅ Panel de soporte desplegado en ${canalPanel}`, ephemeral: true });
+        return message.reply(`✅ El panel se ha generado e instalado con éxito en ${canalPanel}`);
     }
 
-    if (commandName === 'borrar') {
-        const modulo = options.getString('modulo');
-        if (modulo === 'tickets') db.tickets = { canal: null, categoria: null, rolStaff: null };
-        else db[modulo].canal = null;
-
-        return interaction.reply({ content: `🧹 Se ha desvinculado la configuración del módulo **${modulo}**.`, ephemeral: true });
-    }
-
-    if (commandName === 'ip') {
+    // Comando !ip (Público)
+    if (command === 'ip') {
         const embedIp = new EmbedBuilder()
-            .setTitle('🧜‍♀️ CONÉCTATE A SIRENMC')
+            .setTitle('突破 CONÉCTATE A SIRENMC NETWORK 突破')
             .setColor('#00ffbb')
             .addFields(
-                { name: '🌐 Dirección IP (Java & Bedrock)', value: '`play.sirenmc.net`', inline: false },
-                { name: '🔌 Puerto Bedrock', value: '`19132`', inline: true },
-                { name: '🛒 Sitio Web / Tienda', value: '[tienda.sirenmc.net](https://tienda.sirenmc.net)', inline: true }
+                { name: '🌐 Dirección IP Única (Java / Bedrock)', value: '`play.sirenmc.net`', inline: false },
+                { name: '🔌 Puerto Oficial Bedrock', value: '`19132`', inline: true },
+                { name: '🛒 Plataforma de Tienda', value: '[tienda.sirenmc.net](https://tienda.sirenmc.net)', inline: true }
             )
-            .setFooter({ text: 'SirenMc Network' });
-        return interaction.reply({ embeds: [embedIp] });
-    }
-
-    // --- COMANDOS INTERNOS GESTIÓN DE TICKETS ---
-    if (commandName === 'claim') {
-        if (!interaction.channel.name.startsWith('ticket-')) {
-            return interaction.reply({ content: '❌ Este comando solo funciona dentro de canales de tickets.', ephemeral: true });
-        }
-        return interaction.reply({ content: `🔒 Este ticket ahora está bajo el cargo directo de ${interaction.user}.` });
-    }
-
-    if (commandName === 'unclaim') {
-        if (!interaction.channel.name.startsWith('ticket-')) {
-            return interaction.reply({ content: '❌ Este comando solo funciona dentro de canales de tickets.', ephemeral: true });
-        }
-        return interaction.reply({ content: `🔓 ${interaction.user} ha liberado el ticket. Queda abierto para otro miembro del equipo.` });
-    }
-
-    if (commandName === 'rename') {
-        if (!interaction.channel.name.startsWith('ticket-')) {
-            return interaction.reply({ content: '❌ Este comando solo funciona dentro de canales de tickets.', ephemeral: true });
-        }
-        const nuevoNombre = options.getString('nombre').toLowerCase().replace(/\s+/g, '-');
-        await interaction.channel.setName(`ticket-${nuevoNombre}`);
-        return interaction.reply({ content: `✍️ Canal actualizado correctamente a: \`ticket-${nuevoNombre}\``, ephemeral: true });
+            .setImage(IMAGEN_SIRENMC);
+        return message.reply({ embeds: [embedIp] });
     }
 });
 
-// --- LÓGICA DE MENÚ DESPLEGABLE Y FORMULARIOS (MODALS) ---
+// --- ENTRADA DE CONFIGURACIÓN DE MENÚS Y COMPONENTES ---
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu_tickets') {
-        const categoriaSeleccionada = interaction.values[0];
+        const categoriaElegida = interaction.values[0];
 
         if (!db.tickets.categoria || !db.tickets.rolStaff) {
-            return interaction.reply({ content: '❌ El sistema de soporte no ha sido configurado en este servidor por la administración.', ephemeral: true });
+            return interaction.reply({ content: '❌ El sistema no se encuentra estructurado correctamente en este momento.', ephemeral: true });
         }
 
         const modal = new ModalBuilder()
-            .setCustomId(`modal_ticket_${categoriaSeleccionada}`)
-            .setTitle(`Formulario: ${categoriaSeleccionada}`);
+            .setCustomId(`modal_ticket_${categoriaElegida}`)
+            .setTitle(`Formulario: ${categoriaElegida}`);
 
         const inputIgn = new TextInputBuilder()
             .setCustomId('ticket_ign')
             .setLabel('IGN (Tu Nick de Minecraft)')
-            .setPlaceholder('Ej: SirenPlayer_7')
+            .setPlaceholder('Introduce tu nick exacto en el juego')
             .setStyle(TextInputStyle.Short)
             .setRequired(true);
 
         const inputMotivo = new TextInputBuilder()
             .setCustomId('ticket_motivo')
-            .setLabel('Motivo de tu consulta')
+            .setLabel('Detalla los motivos del ticket')
             .setPlaceholder('Describe de forma directa cuál es el inconveniente o solicitud...')
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(true);
@@ -241,19 +155,16 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.showModal(modal);
     }
 
-    // Procesar el envío del Formulario
+    // Procesamiento del Formulario Enviado por el Usuario
     if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_ticket_')) {
         await interaction.deferReply({ ephemeral: true });
-        
+
         const tipoTicket = interaction.customId.replace('modal_ticket_', '');
         const ign = interaction.fields.getTextInputValue('ticket_ign');
         const motivo = interaction.fields.getTextInputValue('ticket_motivo');
 
-        const nombreCanal = `ticket-${tipoTicket}-${interaction.user.username}`;
-
-        // Crear el canal de texto privado en la categoría correspondiente
         const ticketChannel = await interaction.guild.channels.create({
-            name: nombreCanal,
+            name: `ticket-${tipoTicket}-${interaction.user.username}`,
             type: ChannelType.GuildText,
             parent: db.tickets.categoria,
             permissionOverwrites: [
@@ -263,20 +174,27 @@ client.on('interactionCreate', async (interaction) => {
             ],
         });
 
-        const embedInterno = new EmbedBuilder()
-            .setTitle(`🧜‍♀️ ASISTENCIA SOLICITADA: ${tipoTicket.toUpperCase()}`)
-            .setColor('#00ffaa')
+        const embedTicketInterno = new EmbedBuilder()
+            .setTitle(`🧜‍♀️ DETALLES DEL TICKET: ${tipoTicket.toUpperCase()}`)
+            .setDescription('Un miembro del equipo de soporte atenderá este caso a la brevedad posible. Puedes aportar capturas de pantalla o pruebas adicionales mientras esperas.')
+            .setColor('#2ef9a0')
             .addFields(
                 { name: '👤 Solicitante', value: `${interaction.user}`, inline: true },
-                { name: '🎮 IGN', value: `\`${ign}\``, inline: true },
+                { name: '🎮 IGN (Nick)', value: `\`${ign}\``, inline: true },
                 { name: '📝 Motivo', value: motivo, inline: false }
             )
-            .setFooter({ text: 'SirenMc Network Staff' })
+            .setImage(IMAGEN_SIRENMC)
             .setTimestamp();
 
-        const botonCerrar = new ActionRowBuilder().addComponents(
+        // Botonera alineada al lado: Reclamar y Cerrar
+        const filaComponentes = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setCustomId('cerrar_ticket_canal')
+                .setCustomId('reclamar_ticket')
+                .setLabel('Reclamar Ticket')
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('🛡️'),
+            new ButtonBuilder()
+                .setCustomId('cerrar_ticket')
                 .setLabel('Cerrar Ticket')
                 .setStyle(ButtonStyle.Danger)
                 .setEmoji('🔒')
@@ -284,37 +202,65 @@ client.on('interactionCreate', async (interaction) => {
 
         await ticketChannel.send({ 
             content: `||${interaction.user} | <@&${db.tickets.rolStaff}>||`, 
-            embeds: [embedInterno], 
-            components: [botonCerrar] 
+            embeds: [embedTicketInterno], 
+            components: [filaComponentes] 
         });
 
-        return interaction.editReply({ content: `✅ Canal de soporte generado con éxito. Ingresa en: ${ticketChannel}` });
+        return interaction.editReply({ content: `✅ Canal asignado correctamente. Accede mediante: ${ticketChannel}` });
     }
 
-    // Acción de cierre mediante botón dentro de los canales creados
-    if (interaction.isButton() && interaction.customId === 'cerrar_ticket_canal') {
-        await interaction.reply({ content: '🔒 El canal será eliminado de forma definitiva en 5 segundos...' });
-        setTimeout(async () => {
-            try { await interaction.channel.delete(); } catch(e){}
-        }, 5000);
+    // --- MANEJO DE BOTONES INTERNOS ---
+    if (interaction.isButton()) {
+        // Botón Reclamar
+        if (interaction.customId === 'reclamar_ticket') {
+            const esStaff = interaction.member.roles.cache.has(db.tickets.rolStaff) || interaction.member.permissions.has(PermissionFlagsBits.ManageMessages);
+            if (!esStaff) {
+                return interaction.reply({ content: '❌ Solo los miembros del equipo de soporte pueden reclamar este canal.', ephemeral: true });
+            }
+
+            // Deshabilitar botón de reclamar modificando la botonera
+            const filaActualizada = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('reclamar_ticket')
+                    .setLabel(`Reclamado por ${interaction.user.username}`)
+                    .setStyle(ButtonStyle.Success)
+                    .setDisabled(true)
+                    .setEmoji('✅'),
+                new ButtonBuilder()
+                    .setCustomId('cerrar_ticket')
+                    .setLabel('Cerrar Ticket')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('🔒')
+            );
+
+            await interaction.message.edit({ components: [filaActualizada] });
+            return interaction.reply({ content: `🛡️ El ticket ha sido tomado bajo control directo por ${interaction.user}.` });
+        }
+
+        // Botón Cerrar
+        if (interaction.customId === 'cerrar_ticket') {
+            await interaction.reply({ content: '🔒 Archivando conversación... Eliminación del canal activa en 5 segundos.' });
+            setTimeout(async () => {
+                try { await interaction.channel.delete(); } catch(e){}
+            }, 5000);
+        }
     }
 });
 
-// --- ENTRADAS AUTOMÁTICAS Y EVENTOS DEL SERVIDOR ---
+// --- GESTIÓN DE BIENVENIDAS Y ALERTAS NITRO BOOST ---
 client.on('guildMemberAdd', async (member) => {
     if (!db.bienvenidas.canal) return;
     const channel = member.guild.channels.cache.get(db.bienvenidas.canal);
     if (!channel) return;
 
     const embed = new EmbedBuilder()
-        .setTitle('🧜‍♀️ ¡Bienvenido a SirenMc Network! 🧜‍♀️')
-        .setDescription(`¡Hola ${member}! Te damos la bienvenida a nuestra comunidad oficial.\n\nRecuerda revisar las normativas del servidor y disfrutar de tu estancia en nuestras modalidades.`)
+        .setTitle('🧜‍♀️ ¡Bienvenido/a a SirenMc Network! 🧜‍♀️')
+        .setDescription(`Hola ${member}, nos alegra tenerte en nuestra comunidad.\n\nRecuerda revisar los canales de información general para no perderte de nada.`)
         .setColor('#00aaff')
         .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-        .setFooter({ text: `Miembro #${member.guild.memberCount}` })
-        .setTimestamp();
+        .setFooter({ text: `Miembro registrado #${member.guild.memberCount}` });
 
-    channel.send({ content: `¡Bienvenido/a a SirenMc, ${member}!`, embeds: [embed] });
+    channel.send({ content: `¡Bienvenido/a ${member}!`, embeds: [embed] });
 });
 
 client.on('guildMemberUpdate', (oldMember, newMember) => {
@@ -324,15 +270,13 @@ client.on('guildMemberUpdate', (oldMember, newMember) => {
 
     if (!oldMember.premiumSince && newMember.premiumSince) {
         const embed = new EmbedBuilder()
-            .setTitle('💎 ¡NUEVO NITRO BOOST EN SIRENMC! 💎')
-            .setDescription(`¡Agradecemos enormemente a ${newMember} por otorgar un **Nitro Boost** a nuestra comunidad!\n\nDisfruta de tus ventajas exclusivas en Discord y la Network de inmediato. ✨`)
+            .setTitle('💎 ¡NUEVO BOOST DETECTADO! 💎')
+            .setDescription(`Muchas gracias ${newMember} por apoyar a la red con tu **Nitro Boost**.\n\nTus beneficios dentro del servidor han sido otorgados con éxito. ✨`)
             .setColor('#ff73fa')
-            .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
-            .setTimestamp();
+            .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }));
 
-        channel.send({ content: `🎉 ¡Muchas gracias por el Boost, ${newMember}!`, embeds: [embed] });
+        channel.send({ embeds: [embed] });
     }
 });
 
 client.login(config.TOKEN);
-            
