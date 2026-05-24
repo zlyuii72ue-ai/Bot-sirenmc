@@ -34,6 +34,7 @@ const client = new Client({
     ]
 });
 
+// Imagen exclusiva para el sistema de soporte
 const IMAGEN_SIRENMC = "https://cdn.discordapp.com/attachments/1498839434647441478/1508063329845776455/Screenshot_20260524-050445.Google.png?ex=6a142cec&is=6a12db6c&hm=d982b9f4852e2e8c4a4307e68c3f90426cd66f69e6bb34a5f83a249f9895853c&";
 
 const dbPath = path.join(__dirname, 'database.json');
@@ -48,7 +49,7 @@ if (fs.existsSync(dbPath)) {
 }
 const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 
-// --- COMANDOS (/) ---
+// --- DECLARACIÓN DE SLASH COMMANDS ---
 const slashCommandsData = [
     new SlashCommandBuilder().setName('help').setDescription('Muestra los comandos para los usuarios.'),
     new SlashCommandBuilder().setName('helpadmin').setDescription('Comandos de configuración para el Staff.').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -77,7 +78,7 @@ client.once('ready', async () => {
     }
 });
 
-// --- COMPONENTES TEXTO (MENOS "IA", MÁS NATURALES) ---
+// --- COMPONENTES TEXTO (NATURALES, ESTILO MINECRAFT) ---
 async function ejecutarHelp() {
     const embedHelp = new EmbedBuilder()
         .setTitle('Comandos de SirenMc')
@@ -197,7 +198,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// --- INTERACCIONES Y FORMULARIOS PERSONALIZADOS ---
+// --- INTERACCIONES Y FORMULARIOS ---
 client.on('interactionCreate', async (interaction) => {
     // 1. Slash Commands (/)
     if (interaction.isChatInputCommand()) {
@@ -236,7 +237,7 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // 2. Selección de Categoría de Ticket (Crea las preguntas dinámicas)
+    // 2. Selección de Categoría (Formularios Adaptados)
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu_tickets') {
         const cat = interaction.values[0];
 
@@ -255,11 +256,9 @@ client.on('interactionCreate', async (interaction) => {
 
         const modal = new ModalBuilder().setCustomId(`modal_ticket_${cat}`).setTitle(`Ticket: ${cat}`);
 
-        // Campos base universales
         const campoNick = new TextInputBuilder().setCustomId('f_nick').setLabel('Tu Nick de Minecraft:').setPlaceholder('Escribe tu nombre exacto en el juego').setStyle(TextInputStyle.Short).setRequired(true);
         const campoMotivo = new TextInputBuilder().setCustomId('f_motivo').setLabel('Motivo o explicación:').setPlaceholder('Explica qué sucedió de la forma más detallada posible').setStyle(TextInputStyle.Paragraph).setRequired(true);
 
-        // Campos dinámicos según el tipo seleccionado
         if (cat === 'Revives') {
             campoMotivo.setLabel('¿Cómo moriste? (Detalla el bug):');
             modal.addComponents(new ActionRowBuilder().addComponents(campoNick), new ActionRowBuilder().addComponents(campoMotivo));
@@ -269,22 +268,22 @@ client.on('interactionCreate', async (interaction) => {
             modal.addComponents(new ActionRowBuilder().addComponents(campoNick), new ActionRowBuilder().addComponents(campoReportado), new ActionRowBuilder().addComponents(campoMotivo));
         } 
         else if (cat === 'Tienda') {
-            const campoTransaccion = new TextInputBuilder().setCustomId('f_extra').setLabel('ID de Transacción / ID de factura:').setPlaceholder('Pega el ID de compra enviado a tu correo electrónico.').setStyle(TextInputStyle.Short).setRequired(true);
+            const campoTransaccion = new TextInputBuilder().setCustomId('f_extra').setLabel('ID de Transacción / Factura:').setPlaceholder('ID de compra enviado a tu correo').setStyle(TextInputStyle.Short).setRequired(true);
             modal.addComponents(new ActionRowBuilder().addComponents(campoNick), new ActionRowBuilder().addComponents(campoTransaccion), new ActionRowBuilder().addComponents(campoMotivo));
         }
         else if (cat === 'Apelaciones') {
             const campoRazon = new TextInputBuilder().setCustomId('f_extra').setLabel('¿Por qué deberías ser desbaneado?:').setPlaceholder('Indica tus razones o pruebas de defensa legítimas.').setStyle(TextInputStyle.Paragraph).setRequired(true);
-            modal.addComponents(new ActionRowBuilder().addComponents(campoNick), new ActionRowBuilder().addComponents(campoMotivo).setComponents(new TextInputBuilder().setCustomId('f_motivo').setLabel('Razón de tu ban (lo que ponía al salir):').setStyle(TextInputStyle.Short).setRequired(true)), new ActionRowBuilder().addComponents(campoRazon));
+            campoMotivo.setLabel('Razón de tu ban (texto en pantalla):');
+            modal.addComponents(new ActionRowBuilder().addComponents(campoNick), new ActionRowBuilder().addComponents(campoMotivo), new ActionRowBuilder().addComponents(campoRazon));
         }
         else {
-            // Soporte General, Ayuda, Reportes, Bugs usan el formato estándar
             modal.addComponents(new ActionRowBuilder().addComponents(campoNick), new ActionRowBuilder().addComponents(campoMotivo));
         }
 
         await interaction.showModal(modal);
     }
 
-    // 3. Envío del Formulario (Creación Física del canal de soporte)
+    // 3. Envío del Formulario (Creación física del canal)
     if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_ticket_')) {
         await interaction.deferReply({ ephemeral: true });
 
@@ -317,9 +316,9 @@ client.on('interactionCreate', async (interaction) => {
                 { name: 'Nick en Juego', value: `\`${nick}\``, inline: true }
             );
 
-        // Agrega el campo extra en el embed según el formulario que se llenó
         if (tipoTicket === 'Reportar' && infoExtra) embedTicketInterno.addFields({ name: 'Usuario Reportado', value: `\`${infoExtra}\``, inline: true });
         if (tipoTicket === 'Tienda' && infoExtra) embedTicketInterno.addFields({ name: 'ID Transacción', value: `\`${infoExtra}\``, inline: true });
+        if (tipoTicket === 'Apelaciones' && infoExtra) embedTicketInterno.addFields({ name: 'Argumento de Defensa', value: infoExtra, inline: false });
         
         embedTicketInterno.addFields({ name: 'Explicación del Caso', value: motivo, inline: false });
         embedTicketInterno.setImage(IMAGEN_SIRENMC).setTimestamp();
@@ -338,7 +337,7 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.editReply({ content: `Tu canal de soporte ha sido creado en: ${ticketChannel}` });
     }
 
-    // 4. Gestión de Botones dentro de los Tickets (Reclamar / Cerrar)
+    // 4. Gestión de Botones
     if (interaction.isButton()) {
         if (interaction.customId === 'reclamar_ticket') {
             const esStaff = interaction.member.roles.cache.has(db.tickets.rolStaff) || interaction.member.permissions.has(PermissionFlagsBits.ManageMessages);
@@ -360,7 +359,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// --- ENTRADAS AUTOMÁTICAS (BIENVENIDAS Y BOOSTS) ---
+// --- ENTRADAS AUTOMÁTICAS (CORREGIDAS) ---
 client.on('guildMemberAdd', async (member) => {
     if (!db.bienvenidas.canal) return;
     const channel = member.guild.channels.cache.get(db.bienvenidas.canal);
@@ -368,12 +367,12 @@ client.on('guildMemberAdd', async (member) => {
 
     const embed = new EmbedBuilder()
         .setTitle('¡Bienvenido/a a SirenMc Network!')
-        .setDescription(`Hola ${member}, qué bueno tenerte por aquí.\n\nRecuerda revisar las reglas del servidor para evitar inconvenientes y pásate por el canal de IP si necesitas los datos para conectarte a las modalidades. ¡Diviértete!`)
+        .setDescription(`Hola ${member.user}, qué bueno tenerte por aquí.\n\nRecuerda revisar las reglas del servidor para evitar inconvenientes y pásate por el canal de IP si necesitas los datos para conectarte a las modalidades. ¡Diviértete!`)
         .setColor('#007BFF')
         .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
         .setFooter({ text: `Eres el miembro número #${member.guild.memberCount}`, iconURL: member.guild.iconURL() });
 
-    channel.send({ content: `¡Bienvenido/a a la comunidad, ${member}!`, embeds: [embed] });
+    channel.send({ content: `¡Bienvenido/a a la comunidad, ${member.user}!`, embeds: [embed] });
 });
 
 client.on('guildMemberUpdate', (oldMember, newMember) => {
@@ -381,15 +380,20 @@ client.on('guildMemberUpdate', (oldMember, newMember) => {
     const channel = oldMember.guild.channels.cache.get(db.boosts.canal);
     if (!channel) return;
 
-    // Se corrigió el bug de [object Object] usando .user para la mención de texto plano externo
     if (!oldMember.premiumSince && newMember.premiumSince) {
+        const contadorBoosts = newMember.guild.premiumSubscriptionCount || 0;
+
         const embed = new EmbedBuilder()
             .setTitle('¡SirenMc ha recibido un Nitro Boost!')
-            .setDescription(`Muchísimas gracias a ${newMember} por mejorar el servidor con su Nitro Boost.\n\nTu apoyo nos ayuda un montón a mantener activa la network. Ya tienes tus beneficios estéticos asignados en el juego.`)
+            .setDescription(`Muchísimas gracias a ${newMember.user} por mejorar el servidor con su Nitro Boost.\n\nTu apoyo nos ayuda un montón a mantener activa la network. Ya tienes tus beneficios estéticos asignados en el juego.`)
             .setColor('#00C3FF')
-            .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }));
+            .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
+            .setFooter({ text: `SirenMc Network • Alerta de Donación` });
 
-        channel.send({ content: `¡Gracias por el soporte, ${newMember.user}!`, embeds: [embed] });
+        channel.send({ 
+            content: `¡Gracias por el boost! (Tenemos actualmente ${contadorBoosts} boosts) <@1449933432695033947>!`, 
+            embeds: [embed] 
+        });
     }
 });
 
